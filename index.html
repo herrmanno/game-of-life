@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <script crossorigin src="https://unpkg.com/react@16/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@16/umd/react-dom.development.js"></script>
+    <script crossorigin src="https://unpkg.com/redux@4.0.0/dist/redux.js"></script>
+    <title>Game of life</title>
+    <style>
+        html {
+            font-size: 16px;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        @media screen and (min-width: 800px) {
+            .app {
+                max-width: 800px;
+                margin: 0 auto;
+            }
+        }
+        .gamemap-container {
+            position: relative;
+            height: fit-content;
+        }
+        .gamemap {
+            width: 100%;
+            height: fit-content;
+        }
+        .gamemap__row {
+            display: flex;
+            justify-content: space-around;
+        }
+        .gamemap__cell {
+            display: inline-block;
+            height: 100%;
+            border: 1px solid lightgray;
+        }
+        .gamemap__cell::after {
+            content: "";
+            margin-bottom: 100%;
+            display: block;
+        }
+        .gamemap__cell--alive {
+            background-color: lightcoral;
+        }
+        .terminal-state {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <main id="react-root"></main>
+    <script type="text/javascript">
+        const { Fragment, PureComponent, createElement: r } = React
+        const { createStore } = Redux
+
+        /**
+        * encapsulates basic game logic, e. g. state transformation
+        */
+        const Game = {
+            /**
+            * @argument dimension {number}
+            * @return boolean[][]
+            */
+            createMap(dimension) {
+                return new Array(dimension).fill(0)
+                            .map(row => new Array(dimension).fill(0).map(() => Math.random() > .5))
+            },
+            /**
+            * @argument map {bolean[][]}
+            * @return string
+            */
+            serializeGameState(map) {
+                return map.reduce((acc, row) => acc + row.reduce((acc, cell) => acc + (+cell).toString() , "") , "")
+            },
+            /**
+            * @argument map {bolean[][]}
+            * @return boolean[][]
+            */
+            calculateNextState(map) {
+                return map.map((row, y) => {
+                    return row.map((cell, x) => {
+                        const neighbours = this.findNeighbours(map, { x, y })
+                        const aliveCount = neighbours.reduce((acc, alive) => +acc + +alive)
+                        if (cell) {
+                            if (aliveCount < 2 || aliveCount > 3) {
+                                return false
+                            }
+                            else {
+                                return true
+                            }
+                        } else {
+                            if (aliveCount === 3) {
+                                return true
+                            } else {
+                                return false
+                            }
+                        }
+                    })
+                })
+            },
+            /**
+            * @argument map {boolean[][]}
+            * @argument coords {{x: number, y: number}}
+            * @return boolean[]
+            */
+            findNeighbours(map, coords) {
+                return [-1, 0, 1].reduce(
+                    (acc, ydiff) => {
+                        const neighbours = [-1, 0, 1].map(xdiff => {
+                            if (xdiff || ydiff) {
+                                const ny = (coords.y + ydiff + map.length) % map.length
+                                const nx = (coords.x + xdiff + map.length) % map.length
+                                return map[ny][nx]
+                            } else {
+                                return null
+                            }
+                        })
+                        return acc.concat(neighbours)
+                    },
+                    [])
+                    .filter(n => n !== null)
+            }
+        }
+
+
+        const initialState = {
+            dimension: 8,
+            speed: 1,
+            step: 0,
+            map: [],
+            states: [],
+            terminalState: null,
+            update: null
+        }
+        const store = createStore(
+            function(state, action) {
+                switch (action.type) {
+                    case "init": {
+                        return {
+                            ...state,
+                            map: Game.createMap(state.dimension)
+                        }
+                    }
+                    case "start": {
+                        if (state.update !== null) {
+                            clearInterval(state.update)
+                        }
+                        return {
+                            ...state,
+                            update: setInterval(() => store.dispatch({ type: "update" }), 1000 / state.speed)
+                        }
+                    }
+                    case "pause": {
+                        if (state.update !== null) {
+                            clearInterval(state.update)
+                            return {
+                                ...state,
+                                update: null
+                            }
+                        } else {
+                            return {
+                                ...state,
+                                update: setInterval(() => store.dispatch({ type: "update" }), 1000 / state.speed)
+                            }
+                        }
+                    }
+                    case "update": {
+                        const newMap = Game.calculateNextState(state.map)
+                        const newMapSerialized = Game.serializeGameState(newMap)
+                        if (state.states.indexOf(newMapSerialized) === 0) {
+                            return {
+                                ...state,
+                                terminalState: "final"
+                            }
+                        }
+                        else if (state.states.indexOf(newMapSerialized) > 0) {
+                            return {
+                                ...state,
+                                terminalState: "stable"
+                            }
+                        } else {
+                            return {
+                                ...state,
+                                map: newMap,
+                                states: [ newMapSerialized, ...state.states ],
+                                step: state.step + 1
+                            }
+                        }
+                    }
+                    case "reset": {
+                        return {
+                            ...state,
+                            step: 0,
+                            map: Game.createMap(state.dimension),
+                            states: [],
+                            terminalState: null,
+                        }
+                    }
+                    case "clear": {
+                        return {
+                            ...state,
+                            step: 0,
+                            map: state.map.map(row => row.map(cell => false)),
+                            states: [],
+                            terminalState: null,
+                        }
+                    }
+                    case "toggleCell": {
+                        return {
+                            ...state,
+                            map: state.map.map((row, y) =>
+                                row.map((cell, x) =>
+                                    y === action.payload.y && x === action.payload.x
+                                        ? !cell
+                                        : cell
+                                )
+                            )
+                        }
+                    }
+                    case "setSpeed": {
+                        const speed = action.payload
+                        return {
+                            ...state,
+                            speed: speed,
+                            update: state.update !== null
+                                ? setInterval(() => store.dispatch({ type: "update" }), 1000 / speed)
+                                : null
+                        }
+                    }
+                    case "setDimension": {
+                        const dimension = action.payload
+                        return {
+                            ...state,
+                            dimension: dimension,
+                            step: 0,
+                            map: Game.createMap(dimension),
+                            states: [],
+                            terminalState: null,
+                        }
+                    }
+                    default: return state
+                }
+            },
+            initialState)
+
+      
+        /**
+        * A complete 'Game of life' Application
+        */
+        class App extends React.PureComponent {
+
+            constructor() {
+                super()
+
+                store.dispatch({ type: "init" })
+                store.dispatch({ type: "start" })
+                store.subscribe(() => {
+                    const { dimension, speed, step, terminalState } = store.getState()
+                    if (terminalState) {
+                        this.forceUpdate()
+                    }
+                    // only update regulary if speed * dimension is 'low' - otherwise the gui won't be able to update as fast as state changes
+                    else if (step % Math.floor(speed * dimension / 50)) {
+                        this.forceUpdate()
+                    }
+                })
+            }
+
+            _onChangeSpeed(speed) {
+                store.dispatch({ type: "setSpeed", payload: speed })
+            }
+
+            _onChangeDimension(dim) {
+                store.dispatch({ type: "setDimension", payload: dim })
+            }
+
+            _onReset() {
+                store.dispatch({ type: "reset" })
+            }
+
+            _onClear() {
+                store.dispatch({ type: "clear" })
+            }
+
+            _onPause() {
+                store.dispatch({ type: "pause" })
+            }
+
+            _onToggleCell(payload) {
+                store.dispatch({ type: "toggleCell", payload })
+            }
+
+            render() {
+                const {
+                    step,
+                    speed,
+                    dimension,
+                    map,
+                    terminalState
+                } = store.getState()
+
+                return (
+                    r("div", { className: "app" },
+                        r(Headline, { key: "headline" }),
+                        r(Explanation),
+                        r(Params, {
+                            step,
+                            speed,
+                            dimension,
+                            onChangeSpeed: this._onChangeSpeed,
+                            onChangeDim: this._onChangeDimension,
+                            onReset: this._onReset,
+                            onClear: this._onClear,
+                            onPause: this._onPause
+                        }),
+                        r("div", { className: "gamemap-container" },
+                            r(GameMap, {
+                                key: "gamemap",
+                                map: map,
+                                onToggleCell: this._onToggleCell
+                            }),
+                            r(TerminalState, { state: terminalState }),
+                        )
+                    )
+                )
+            }
+        }
+
+        /**
+        * The ame's headline
+        */
+        function Headline() {
+            return r("h1", { key: "headline" }, "Game of life")
+        }
+
+        /**
+        * A panel with explanation text
+        */
+        function Explanation() {
+            return (
+                r("details", { open: true},
+                    r("summary", {}, "Explanation"),
+                    r("p", {}, "This is an example implementation of “Game of life“."),
+                    r("p", {}, "You can use the controls from the `parameter` panel to change the behaviour and state of the game. Also, you can toggle a cells state by clicking it in order to generate a custom initial state."),
+                )
+            )
+        }
+
+        /**
+        * A Panel with controls to change game parameters
+        * @argument props {{
+            dimension: number,
+            speed: number,
+            step: number,
+            onChangeDim: (d: number) => any,
+            onChangeSpeed: (s: number) => any,
+            onReset: () => any,
+            onPause: () => any,
+            onClear: () => any
+        }}
+        */
+        function Params(props) {
+            const {
+                dimension,
+                step,
+                speed,
+                onChangeDim,
+                onChangeSpeed,
+                onReset,
+                onPause,
+                onClear
+            } = props
+            return (
+                r("details", { open: true},
+                    r("summary", {}, "Parameters"),
+                    r("fieldset", {},
+                        r("legend", {}, "Step"),
+                        r("span", { title: "The number of already applied state transformations" }, `Value: ${step}`),
+                    ),
+                    r("fieldset", {},
+                        r("legend", {}, "Speed"),
+                        r("span", {}, `Value: ${speed}`),
+                        r("input", {
+                            title: "The amout of state transformations per second",
+                            type: "range",
+                            min: 1,
+                            max: 15,
+                            step: 1,
+                            value:
+                            speed, onChange(e) { onChangeSpeed(+e.target.value)}
+                        }),
+                    ),
+                    r("fieldset", {},
+                        r("legend", {}, "Dimension"),
+                        r("span", {}, `Value: ${dimension}`),
+                        r("input", {
+                            title: "The number of cells per row and rows per map",
+                            type: "range",
+                            min: 3,
+                            max: 32,
+                            step: 1,
+                            value: dimension,
+                            onChange(e) { onChangeDim(+e.target.value)}
+                        })
+                    ),
+                    r("fieldset", {},
+                        r("legend", {}, "Actions"),
+                        r("button", { onClick: onReset, title: "Resets the map to a random state" }, "Reset"),
+                        r("button", { onClick: onClear, title: "Resets the map to an empty state" }, "Clear"),
+                        r("button", { onClick: onPause, title: "Pauses or resumes the state transformation" }, "Pause / Resume")
+                    )
+                )
+            )
+        }
+
+        /**
+        * An (overlaying) headline that promps a (terminal state) message
+        * @argument props {{state: string | null}}
+        */
+        function TerminalState(props) {
+            const { state } = props
+            const text = {
+                final: "Final state reached",
+                stable: "Stable state reached"
+            }[state]
+            if (!state) {
+                return null
+            } else {
+                return r("div", { className: "terminal-state" }, r("h2", {}, text))
+            }
+        }
+
+        /**
+        * A 2d matrix of cells
+        * @argument props {{map: boolean[][]}} the 2d matrix of cells
+        */
+        function GameMap(props) {
+            const cellWidth = 0.9 * (100 / props.map.length)
+
+            return (
+                r("div", { className: "gamemap"},
+                    props.map.map((row, y) =>
+                        r("div", { key: y, className: "gamemap__row" }, row.map((alive, x) =>
+                            // r(Cell, { key: idx, alive: cell })
+                            r(
+                                "span",
+                                {
+                                    key: x,
+                                    style: { minWidth: cellWidth + "%" },
+                                    className: ["gamemap__cell", alive && "gamemap__cell--alive"].filter(Boolean).join(" "),
+                                    onClick: () => props.onToggleCell({y, x})
+                                })
+                        ))
+                    )
+                )
+            )
+        }
+
+        ReactDOM.render(r(App), document.getElementById("react-root"))
+    </script>
+</body>
+</html>
